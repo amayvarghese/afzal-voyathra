@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { upload } from "@vercel/blob/client";
-import { ArrowLeft, ArrowRight, Check, FileText, History, Loader2, Star, UploadCloud, X, AlertCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, FileText, History, Loader2, Star, UploadCloud, X, AlertCircle, PencilLine, ClipboardCheck } from "lucide-react";
 import { Button, inputClass } from "@/components/ui/primitives";
-import type { Field, PublicForm, UploadedFile } from "@/lib/types";
+import type { AnswerValue, Field, PublicForm, UploadedFile } from "@/lib/types";
 import { checkField } from "@/lib/validate";
 import { visibleFieldIds } from "@/lib/logic";
+import { formatAnswer } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 
@@ -20,6 +21,8 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
     [form],
   );
   const [step, setStep] = useState(0);
+  // Steps the customer has actually seen — submission requires all of them.
+  const [visited, setVisited] = useState<number[]>([0]);
   const [answers, setAnswers] = useState<Answers>({});
   const [errors, setErrors] = useState<Errors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -102,27 +105,53 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
     });
   }
 
-  function goTo(next: number) {
+  const contentSteps = steps.map((_, i) => i).filter(stepHasContent);
+  const multiStep = contentSteps.length > 1;
+  /** Sentinel step index for the "Review your answers" screen. */
+  const REVIEW = steps.length;
+  const onReview = step === REVIEW;
+  const stepTitle = (i: number) => steps[i]?.map((s) => s.title).filter(Boolean).join(" · ") || `Section ${contentSteps.indexOf(i) + 1}`;
+  const lastNav = useRef(0);
+
+  function goTo(next: number, at?: number) {
+    if (at !== undefined) lastNav.current = at;
+    setSubmitError(null);
     setStep(next);
+    setVisited((v) => (v.includes(next) ? v : [...v, next]));
     requestAnimationFrame(() => topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
   }
 
-  function onContinue() {
+  function onContinue(at?: number) {
     const errs = validate(steps[step].flatMap((s) => s.fields));
     setErrors(errs);
     if (Object.keys(errs).length) return focusFirstError(errs);
     const next = nextStep(step, 1);
-    if (next >= 0) goTo(next);
+    // After the last section, show the review screen rather than submitting.
+    goTo(next >= 0 ? next : REVIEW, at);
   }
 
-  async function onSubmit(e: React.FormEvent) {
+  // Enter in a text box moves forward a section; it never submits the questionnaire.
+  function onFormSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (nextStep(step, 1) >= 0) return onContinue();
+    if (!onReview && multiStep) onContinue(e.timeStamp);
+  }
+
+  async function submit(e: React.MouseEvent) {
+    // Ignore a stray second tap right after changing sections (e.g. a double-tap on "Review answers").
+    if (e.timeStamp - lastNav.current < 700) return;
+
+    // Every section must have been shown before the questionnaire can be sent.
+    const unvisited = contentSteps.find((i) => !visited.includes(i));
+    if (unvisited !== undefined) {
+      goTo(unvisited);
+      setSubmitError(`Please complete “${stepTitle(unvisited)}” before submitting.`);
+      return;
+    }
     const errs = validate(allFields);
     setErrors(errs);
     if (Object.keys(errs).length) {
       const firstStep = steps.findIndex((st) => st.some((s) => s.fields.some((f) => errs[f.key])));
-      if (firstStep >= 0 && firstStep !== step) setStep(firstStep);
+      if (firstStep >= 0 && firstStep !== step) goTo(firstStep);
       return focusFirstError(errs);
     }
     setSubmitting(true);
@@ -141,7 +170,7 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
       if (res.status === 422 && j.errors) {
         setErrors(j.errors);
         const firstStep = steps.findIndex((st) => st.some((s) => s.fields.some((f) => j.errors[f.key])));
-        if (firstStep >= 0) setStep(firstStep);
+        if (firstStep >= 0) goTo(firstStep);
         focusFirstError(j.errors);
         setSubmitError("Some answers need attention.");
       } else if (!res.ok) {
@@ -176,15 +205,13 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
 
   const numbers = new Map<string, number>();
   allFields.forEach((f, i) => numbers.set(f.id, i + 1));
-  const isLast = nextStep(step, 1) === -1;
-  const prev = nextStep(step, -1);
-  const contentSteps = steps.map((_, i) => i).filter(stepHasContent);
-  const stepPosition = contentSteps.indexOf(step) + 1;
+  const isLastSection = !onReview && nextStep(step, 1) === -1;
+  const prev = onReview ? contentSteps[contentSteps.length - 1] ?? -1 : nextStep(step, -1);
 
   return (
     <Shell brand={brand} progress={progress}>
       <div ref={topRef} className="scroll-mt-24" />
-      {step === 0 && (
+      {step === contentSteps[0] && (
         <header className="animate-in mb-10">
           <h1 className="font-serif text-[40px] leading-[1.08] tracking-tight text-fg sm:text-[52px]">{form.title}</h1>
           {form.description && <p className="mt-5 whitespace-pre-line text-[17px] leading-relaxed text-fg-muted">{form.description}</p>}
@@ -226,17 +253,33 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
         </div>
       )}
 
-      <form onSubmit={onSubmit} noValidate>
+      <form onSubmit={onFormSubmit} noValidate>
         <input ref={honeypot} name="website" tabIndex={-1} autoComplete="off" aria-hidden className="absolute left-[-9999px] h-0 w-0 opacity-0" />
 
-        {contentSteps.length > 1 && stepPosition > 0 && (
-          <p className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-accent">
-            Step {stepPosition} of {contentSteps.length}
-          </p>
+        {multiStep && (
+          <SectionStepper
+            steps={contentSteps}
+            current={step}
+            reviewing={onReview}
+            visited={visited}
+            titleOf={stepTitle}
+            onJump={(i) => goTo(i)}
+          />
         )}
 
+        {onReview ? (
+          <Review
+            steps={contentSteps}
+            sections={steps}
+            isShown={isShown}
+            answers={answers}
+            numbers={numbers}
+            titleOf={stepTitle}
+            onEdit={(i) => goTo(i)}
+          />
+        ) : (
         <div key={step} className="animate-in space-y-8">
-          {steps[step].filter((section) => section.fields.some(isShown)).map((section) => (
+          {(steps[step] ?? []).filter((section) => section.fields.some(isShown)).map((section) => (
             <section key={section.id} aria-labelledby={section.title ? `s-${section.id}` : undefined}>
               {(section.title || section.description) && (
                 <div className="mb-5">
@@ -266,6 +309,7 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
             </section>
           ))}
         </div>
+        )}
 
         {submitError && (
           <p role="alert" className="mt-6 flex items-start gap-2 rounded-xl bg-danger-soft px-4 py-3 text-sm text-danger">
@@ -281,13 +325,14 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
           ) : (
             <span />
           )}
-          {isLast ? (
-            <Button type="submit" size="lg" loading={submitting} disabled={uploading > 0} className="min-w-40">
+          {/* Distinct keys + type="button": the Continue tap can never turn into a submit. */}
+          {onReview || !multiStep ? (
+            <Button key="submit" type="button" size="lg" onClick={submit} loading={submitting} disabled={uploading > 0} className="min-w-40">
               {uploading > 0 ? "Uploading…" : form.submitLabel || "Submit"}
             </Button>
           ) : (
-            <Button type="button" size="lg" onClick={onContinue} className="min-w-40">
-              Continue <ArrowRight className="size-4" aria-hidden />
+            <Button key="continue" type="button" size="lg" onClick={(e) => onContinue(e.timeStamp)} className="min-w-40">
+              {isLastSection ? "Review answers" : "Continue"} <ArrowRight className="size-4" aria-hidden />
             </Button>
           )}
         </div>
@@ -298,6 +343,138 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
 }
 
 const noopSubscribe = () => () => {};
+
+function SectionStepper({
+  steps,
+  current,
+  reviewing,
+  visited,
+  titleOf,
+  onJump,
+}: {
+  steps: number[];
+  current: number;
+  reviewing: boolean;
+  visited: number[];
+  titleOf: (i: number) => string;
+  onJump: (i: number) => void;
+}) {
+  const pos = steps.indexOf(current);
+  return (
+    <nav aria-label="Questionnaire sections" className="mb-8">
+      <p className="mb-2.5 flex flex-wrap items-baseline gap-x-2 text-xs font-medium uppercase tracking-[0.14em] text-accent">
+        {reviewing ? (
+          <span>Review · all {steps.length} sections</span>
+        ) : (
+          <>
+            <span className="tabular">
+              Section {pos + 1} of {steps.length}
+            </span>
+            <span className="normal-case tracking-normal text-fg-muted">{titleOf(current)}</span>
+          </>
+        )}
+      </p>
+      <ol className="flex gap-1">
+        {steps.map((i, n) => {
+          const isCurrent = !reviewing && i === current;
+          const done = reviewing || (visited.includes(i) && !isCurrent);
+          const reachable = visited.includes(i) && !isCurrent;
+          return (
+            <li key={i} className="min-w-0 flex-1">
+              <button
+                type="button"
+                disabled={!reachable}
+                onClick={() => onJump(i)}
+                aria-current={isCurrent ? "step" : undefined}
+                aria-label={`Section ${n + 1}: ${titleOf(i)}${isCurrent ? " (current)" : done ? " (visited)" : ""}`}
+                title={titleOf(i)}
+                className="group block w-full py-2 disabled:cursor-default"
+              >
+                <span
+                  className={cn(
+                    "block h-1.5 rounded-full transition-colors duration-300",
+                    isCurrent ? "bg-primary" : done ? "bg-accent/70 group-hover:bg-accent" : "bg-surface-3",
+                  )}
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+function Review({
+  steps,
+  sections,
+  isShown,
+  answers,
+  numbers,
+  titleOf,
+  onEdit,
+}: {
+  steps: number[];
+  sections: PublicForm["sections"][];
+  isShown: (f: Field) => boolean;
+  answers: Answers;
+  numbers: Map<string, number>;
+  titleOf: (i: number) => string;
+  onEdit: (i: number) => void;
+}) {
+  return (
+    <div className="animate-in">
+      <div className="mb-8 flex items-start gap-4">
+        <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-accent-soft text-accent">
+          <ClipboardCheck className="size-6" aria-hidden />
+        </span>
+        <div>
+          <h2 className="font-serif text-[34px] leading-tight text-fg">Review your answers</h2>
+          <p className="mt-1.5 text-[15px] leading-relaxed text-fg-muted">
+            Please check everything below. Use <span className="font-medium text-fg">Edit</span> to change a section, then submit when you&apos;re ready.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-4">
+        {steps.map((i) => {
+          const fields = sections[i].flatMap((s) => s.fields).filter((f) => f.type !== "statement" && isShown(f));
+          const unanswered = fields.filter((f) => !formatAnswer(f, answers[f.key] as AnswerValue)).length;
+          return (
+            <section key={i} className="rounded-2xl border border-border bg-surface p-5 shadow-sm sm:p-6" aria-label={titleOf(i)}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="font-serif text-2xl leading-tight text-fg">{titleOf(i)}</h3>
+                  <p className="tabular mt-0.5 text-[13px] text-fg-muted">
+                    {fields.length - unanswered} of {fields.length} answered
+                  </p>
+                </div>
+                <Button type="button" variant="secondary" size="sm" onClick={() => onEdit(i)} aria-label={`Edit ${titleOf(i)}`}>
+                  <PencilLine className="size-4" aria-hidden /> Edit
+                </Button>
+              </div>
+              <dl className="divide-y divide-border">
+                {fields.map((f) => {
+                  const text = formatAnswer(f, answers[f.key] as AnswerValue);
+                  return (
+                    <div key={f.id} className="grid gap-1 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:gap-6">
+                      <dt className="text-sm text-fg-muted">
+                        <span className="tabular mr-1.5 text-accent">{numbers.get(f.id)}.</span>
+                        {f.label}
+                      </dt>
+                      <dd className={cn("whitespace-pre-line text-[15px]", text ? "text-fg" : "italic text-fg-subtle")}>
+                        {text ? text.replace(/ \(https?:[^)]+\)/g, "") : "Not answered"}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function readDraft(key: string): Answers | null {
   try {
