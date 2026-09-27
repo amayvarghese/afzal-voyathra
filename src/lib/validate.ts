@@ -1,6 +1,7 @@
 import type { AnswerValue, Field, FormDoc, UploadedFile } from "./types";
 import { EMAIL_RE } from "./utils";
-import { answerableFields } from "./schema";
+import { allFields } from "./schema";
+import { conditionMet } from "./logic";
 
 export type FieldErrors = Record<string, string>;
 
@@ -115,7 +116,16 @@ export function checkField(field: Field, raw: unknown): [AnswerValue, string | n
 export function validateSubmission(form: Pick<FormDoc, "sections">, data: Record<string, unknown>) {
   const errors: FieldErrors = {};
   const answers: Record<string, AnswerValue> = {};
-  for (const field of answerableFields(form.sections)) {
+  const byId = new Map(allFields(form.sections).map((f) => [f.id, f]));
+  const visible = new Set<string>();
+  // Walk questions in order so follow-ups are judged on already-validated answers.
+  for (const field of allFields(form.sections)) {
+    if (field.showIf) {
+      const ctrl = byId.get(field.showIf.fieldId);
+      if (!ctrl || !visible.has(ctrl.id) || !conditionMet(field.showIf, answers[ctrl.key])) continue; // hidden: not required, not stored
+    }
+    visible.add(field.id);
+    if (field.type === "statement") continue;
     const [value, error] = checkField(field, data[field.key]);
     if (error) errors[field.key] = error;
     else if (value !== null) answers[field.key] = value;

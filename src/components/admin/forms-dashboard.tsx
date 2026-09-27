@@ -378,6 +378,14 @@ function FormCard({
             >
               <ArrowUpRight className="size-4" />
             </a>
+            <button
+              onClick={onDelete}
+              aria-label={`Delete ${form.title}`}
+              title="Delete questionnaire"
+              className="grid size-8 place-items-center rounded-lg text-fg-muted transition-colors hover:bg-danger-soft hover:text-danger"
+            >
+              <Trash2 className="size-4" />
+            </button>
           </div>
         </div>
       </Card>

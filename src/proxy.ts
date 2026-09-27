@@ -9,7 +9,9 @@ async function isAuthed(req: NextRequest) {
   if (!token || secret.length < 32) return false;
   try {
     const { payload } = await jwtVerify(token, new TextEncoder().encode(secret));
-    return payload.role === "admin";
+    // Must match lib/auth.ts: a session for a previous ADMIN_EMAIL is no longer valid.
+    const admin = (process.env.ADMIN_EMAIL ?? "").trim().toLowerCase();
+    return payload.role === "admin" && !!admin && payload.sub === admin;
   } catch {
     return false;
   }

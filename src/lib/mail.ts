@@ -33,7 +33,8 @@ function answersTable(form: FormDoc, answers: Record<string, AnswerValue>) {
   return form.sections
     .map((section) => {
       const rows = section.fields
-        .filter((f) => f.type !== "statement")
+        // Skip statements, and follow-ups the customer never saw.
+        .filter((f) => f.type !== "statement" && !(f.showIf && answers[f.key] === undefined))
         .map((f) => {
           const v = answers[f.key];
           let html: string;
@@ -84,7 +85,7 @@ function plainText(form: FormDoc, answers: Record<string, AnswerValue>) {
   return form.sections
     .flatMap((s) => [
       ...(s.title ? [`\n== ${s.title} ==`] : []),
-      ...s.fields.filter((f) => f.type !== "statement").map((f) => `${f.label}\n${formatAnswer(f, answers[f.key]) || "—"}\n`),
+      ...s.fields.filter((f) => f.type !== "statement" && !(f.showIf && answers[f.key] === undefined)).map((f) => `${f.label}\n${formatAnswer(f, answers[f.key]) || "—"}\n`),
     ])
     .join("\n");
 }

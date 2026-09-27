@@ -277,7 +277,7 @@ function ResponseDrawer({
 
         <div className="flex-1 overflow-y-auto px-6 py-2">
           {form.sections.map((s) => {
-            const sf = s.fields.filter((f) => f.type !== "statement");
+            const sf = s.fields.filter((f) => f.type !== "statement" && !(f.showIf && response.answers[f.key] === undefined));
             if (!sf.length) return null;
             return (
               <section key={s.id} className="py-3">

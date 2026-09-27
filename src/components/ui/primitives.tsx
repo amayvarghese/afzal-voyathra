@@ -157,16 +157,22 @@ export function Switch({
   return (
     <div className={cn("flex items-start justify-between gap-4", disabled && "opacity-50")}>
       <div className="min-w-0">
-        <label htmlFor={id} className="block text-sm font-medium text-fg">
+        <label id={`${id}-label`} htmlFor={id} className="block text-sm font-medium text-fg">
           {label}
         </label>
-        {description && <p className="mt-0.5 text-[13px] text-fg-muted">{description}</p>}
+        {description && (
+          <p id={`${id}-desc`} className="mt-0.5 text-[13px] text-fg-muted">
+            {description}
+          </p>
+        )}
       </div>
       <button
         id={id}
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-labelledby={`${id}-label`}
+        aria-describedby={description ? `${id}-desc` : undefined}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={cn(

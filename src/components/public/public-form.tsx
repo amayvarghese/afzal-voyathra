@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Check, FileText, History, Loader2, Star, UploadC
 import { Button, inputClass } from "@/components/ui/primitives";
 import type { Field, PublicForm, UploadedFile } from "@/lib/types";
 import { checkField } from "@/lib/validate";
+import { visibleFieldIds } from "@/lib/logic";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
 
@@ -47,7 +48,15 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
     return () => clearTimeout(t);
   }, [answers, draftKey, done]);
 
-  const allFields = form.sections.flatMap((s) => s.fields).filter((f) => f.type !== "statement");
+  // Follow-up questions appear/disappear as answers change.
+  const visible = visibleFieldIds(form.sections, answers);
+  const isShown = (f: Field) => visible.has(f.id);
+  const allFields = form.sections.flatMap((s) => s.fields).filter((f) => f.type !== "statement" && isShown(f));
+  const stepHasContent = (i: number) => steps[i].some((s) => s.fields.some(isShown));
+  const nextStep = (from: number, dir: 1 | -1) => {
+    for (let i = from + dir; i >= 0 && i < steps.length; i += dir) if (stepHasContent(i)) return i;
+    return -1;
+  };
   const answeredCount = allFields.filter((f) => {
     const v = answers[f.key];
     return v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0) && !(typeof v === "object" && v && !Array.isArray(v) && Object.keys(v).length === 0);
@@ -67,7 +76,7 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
   function validate(fields: Field[]): Errors {
     const errs: Errors = {};
     for (const f of fields) {
-      if (f.type === "statement") continue;
+      if (f.type === "statement" || !isShown(f)) continue; // hidden follow-ups are never required
       const v = answers[f.key];
       if (typeof v === "string" && v === "Other: ") {
         errs[f.key] = "Please specify your answer.";
@@ -102,12 +111,13 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
     const errs = validate(steps[step].flatMap((s) => s.fields));
     setErrors(errs);
     if (Object.keys(errs).length) return focusFirstError(errs);
-    goTo(step + 1);
+    const next = nextStep(step, 1);
+    if (next >= 0) goTo(next);
   }
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (step < steps.length - 1) return onContinue();
+    if (nextStep(step, 1) >= 0) return onContinue();
     const errs = validate(allFields);
     setErrors(errs);
     if (Object.keys(errs).length) {
@@ -121,7 +131,11 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
       const res = await fetch(`/api/public/${form.slug}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, website: honeypot.current?.value ?? "" }),
+        // Only send answers to questions the customer can actually see.
+        body: JSON.stringify({
+          answers: Object.fromEntries(allFields.filter((f) => answers[f.key] !== undefined).map((f) => [f.key, answers[f.key]])),
+          website: honeypot.current?.value ?? "",
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (res.status === 422 && j.errors) {
@@ -160,10 +174,12 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
     );
   }
 
-  let qNumber = 0;
   const numbers = new Map<string, number>();
-  form.sections.forEach((s) => s.fields.forEach((f) => f.type !== "statement" && numbers.set(f.id, ++qNumber)));
-  const isLast = step === steps.length - 1;
+  allFields.forEach((f, i) => numbers.set(f.id, i + 1));
+  const isLast = nextStep(step, 1) === -1;
+  const prev = nextStep(step, -1);
+  const contentSteps = steps.map((_, i) => i).filter(stepHasContent);
+  const stepPosition = contentSteps.indexOf(step) + 1;
 
   return (
     <Shell brand={brand} progress={progress}>
@@ -213,14 +229,14 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
       <form onSubmit={onSubmit} noValidate>
         <input ref={honeypot} name="website" tabIndex={-1} autoComplete="off" aria-hidden className="absolute left-[-9999px] h-0 w-0 opacity-0" />
 
-        {steps.length > 1 && (
+        {contentSteps.length > 1 && stepPosition > 0 && (
           <p className="mb-3 text-xs font-medium uppercase tracking-[0.14em] text-accent">
-            Step {step + 1} of {steps.length}
+            Step {stepPosition} of {contentSteps.length}
           </p>
         )}
 
         <div key={step} className="animate-in space-y-8">
-          {steps[step].map((section) => (
+          {steps[step].filter((section) => section.fields.some(isShown)).map((section) => (
             <section key={section.id} aria-labelledby={section.title ? `s-${section.id}` : undefined}>
               {(section.title || section.description) && (
                 <div className="mb-5">
@@ -233,7 +249,7 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
                 </div>
               )}
               <div className="space-y-4">
-                {section.fields.map((field) => (
+                {section.fields.filter(isShown).map((field) => (
                   <Question
                     key={field.id}
                     field={field}
@@ -258,8 +274,8 @@ export function PublicFormView({ form, brand }: { form: PublicForm; brand: strin
         )}
 
         <div className="mt-10 flex items-center justify-between gap-3">
-          {step > 0 ? (
-            <Button type="button" variant="ghost" size="lg" onClick={() => goTo(step - 1)}>
+          {prev >= 0 ? (
+            <Button type="button" variant="ghost" size="lg" onClick={() => goTo(prev)}>
               <ArrowLeft className="size-4" aria-hidden /> Back
             </Button>
           ) : (
@@ -366,6 +382,8 @@ function Question({
       className={cn(
         "scroll-mt-28 rounded-2xl border bg-surface p-5 shadow-sm transition-[border-color,box-shadow] duration-200 sm:p-6",
         error ? "border-danger/50" : "border-border focus-within:border-border-strong focus-within:shadow-md",
+        // Follow-ups: gentle entrance + gold rail so customers see they relate to the answer above.
+        field.showIf && "animate-in border-l-[3px] border-l-accent sm:ml-6",
       )}
     >
       <div className="mb-4 flex gap-3">

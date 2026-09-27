@@ -59,6 +59,17 @@ export interface Field {
   max?: number;
   minLabel?: string;
   maxLabel?: string;
+  /** Follow-up logic: only show (and require) this question when the condition matches. */
+  showIf?: Condition;
+}
+
+export type ConditionOp = "equals" | "not_equals" | "includes" | "answered";
+
+export interface Condition {
+  /** id of an earlier question */
+  fieldId: string;
+  op: ConditionOp;
+  value?: string;
 }
 
 export interface Section {

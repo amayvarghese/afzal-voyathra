@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { getForm } from "@/lib/forms";
 import { FormTabs } from "@/components/admin/form-tabs";
 import { ShareButton } from "@/components/admin/share-button";
+import { DeleteFormButton } from "@/components/admin/delete-form-button";
 import { Badge } from "@/components/ui/primitives";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,10 @@ export default async function FormLayout({ children, params }: LayoutProps<"/adm
             )}
           </div>
         </div>
-        <ShareButton slug={form.slug} isOpen={form.settings.isOpen} />
+        <div className="flex shrink-0 gap-2">
+          <DeleteFormButton id={form._id} title={form.title} responseCount={form.responseCount} />
+          <ShareButton slug={form.slug} isOpen={form.settings.isOpen} />
+        </div>
       </div>
       <FormTabs id={form._id} responseCount={form.responseCount} />
       <div className="pt-8">{children}</div>

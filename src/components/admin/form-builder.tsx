@@ -24,6 +24,9 @@ import {
   X,
   LayoutList,
   Check,
+  GitBranch,
+  AlertTriangle,
+  Asterisk,
 } from "lucide-react";
 import { Badge, Button, Input, Kbd, Select, Switch, inputClass } from "@/components/ui/primitives";
 import { ConfirmDialog } from "@/components/ui/dialog";
@@ -31,6 +34,8 @@ import { useToast } from "@/components/ui/toast";
 import { FIELD_ICONS } from "@/components/field-icons";
 import { FIELD_TYPES, FIELD_TYPE_LABELS, type Field, type FieldType, type FormDoc, type Section } from "@/lib/types";
 import { cn, keyify, shortId } from "@/lib/utils";
+import { CONTROLLER_OPS, OP_LABELS, conditionValues, describeCondition } from "@/lib/logic";
+import type { Condition, ConditionOp } from "@/lib/types";
 
 type Content = { title: string; description: string; sections: Section[] };
 
@@ -136,7 +141,14 @@ export function FormBuilder({ form }: { form: FormDoc }) {
   };
 
   const removeField = (fid: string) => {
-    setContent((c) => ({ ...c, sections: c.sections.map((s) => ({ ...s, fields: s.fields.filter((f) => f.id !== fid) })) }));
+    setContent((c) => ({
+      ...c,
+      sections: c.sections.map((s) => ({
+        ...s,
+        // Drop the question, and un-link any follow-ups that depended on it.
+        fields: s.fields.filter((f) => f.id !== fid).map((f) => (f.showIf?.fieldId === fid ? { ...f, showIf: undefined } : f)),
+      })),
+    }));
     setActive(null);
   };
 
@@ -207,7 +219,17 @@ export function FormBuilder({ form }: { form: FormDoc }) {
     }));
   };
 
-  let questionNo = 0;
+  const setSectionRequired = (sid: string, required: boolean) =>
+    setContent((c) => ({
+      ...c,
+      sections: c.sections.map((s) =>
+        s.id === sid ? { ...s, fields: s.fields.map((f) => (f.type === "statement" ? f : { ...f, required })) } : s,
+      ),
+    }));
+
+  const ordered = content.sections.flatMap((s) => s.fields);
+  const numbers = new Map<string, number>();
+  ordered.forEach((f) => f.type !== "statement" && numbers.set(f.id, numbers.size + 1));
   const hasResponses = form.responseCount > 0;
 
   return (
@@ -303,8 +325,23 @@ export function FormBuilder({ form }: { form: FormDoc }) {
                 className="text-sm text-fg-muted"
               />
             </div>
+            <div className="flex shrink-0 items-center gap-0.5 pt-5">
+              {section.fields.some((f) => f.type !== "statement") && (() => {
+                const allRequired = section.fields.every((f) => f.type === "statement" || f.required);
+                return (
+                  <button
+                    onClick={() => setSectionRequired(section.id, !allRequired)}
+                    title={allRequired ? "Make every question in this section optional" : "Make every question in this section required"}
+                    className="mr-1 inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-fg-muted hover:bg-surface-2 hover:text-fg"
+                  >
+                    <Asterisk className="size-3.5" aria-hidden />
+                    <span className="hidden sm:inline">{allRequired ? "All optional" : "All required"}</span>
+                    <span className="sr-only sm:hidden">{allRequired ? "Make all optional" : "Make all required"}</span>
+                  </button>
+                );
+              })()}
             {content.sections.length > 1 && (
-              <div className="flex shrink-0 gap-0.5 pt-5">
+              <>
                 <IconBtn label="Move section up" onClick={() => moveSection(section.id, -1)} disabled={si === 0}>
                   <ArrowUp className="size-4" />
                 </IconBtn>
@@ -314,20 +351,22 @@ export function FormBuilder({ form }: { form: FormDoc }) {
                 <IconBtn label="Delete section" onClick={() => setSectionToDelete(section.id)} danger>
                   <Trash2 className="size-4" />
                 </IconBtn>
-              </div>
+              </>
             )}
+            </div>
           </div>
 
           <DndContext id={`dnd-${section.id}`} sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd(section.id)}>
             <SortableContext items={section.fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
               <ol className="space-y-3">
                 {section.fields.map((field) => {
-                  const number = field.type === "statement" ? null : ++questionNo;
                   return (
                     <FieldCard
                       key={field.id}
                       field={field}
-                      number={number}
+                      number={numbers.get(field.id) ?? null}
+                      ordered={ordered}
+                      numbers={numbers}
                       active={active === field.id}
                       sections={content.sections}
                       sectionId={section.id}
@@ -376,6 +415,8 @@ export function FormBuilder({ form }: { form: FormDoc }) {
 function FieldCard({
   field,
   number,
+  ordered,
+  numbers,
   active,
   sections,
   sectionId,
@@ -388,6 +429,8 @@ function FieldCard({
 }: {
   field: Field;
   number: number | null;
+  ordered: Field[];
+  numbers: Map<string, number>;
   active: boolean;
   sections: Section[];
   sectionId: string;
@@ -412,6 +455,7 @@ function FieldCard({
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
         "relative rounded-2xl border bg-surface transition-[border-color,box-shadow] duration-200",
+        field.showIf && "ml-5 sm:ml-10",
         active ? "border-ring/50 shadow-md ring-4 ring-ring/10" : "border-border shadow-sm hover:border-border-strong",
         isDragging && "z-10 shadow-lg",
       )}
@@ -428,22 +472,44 @@ function FieldCard({
         </button>
 
         {!active ? (
-          <button onClick={onActivate} className="flex min-h-11 min-w-0 flex-1 items-start gap-3 rounded-lg py-2.5 text-left">
-            {number !== null && <span className="tabular mt-px w-6 shrink-0 text-sm text-fg-subtle">{number}.</span>}
-            <span className="min-w-0 flex-1">
-              <span className={cn("block text-[15px] leading-snug", field.label ? "text-fg" : "italic text-fg-subtle", field.type === "statement" && "text-fg-muted")}>
-                {field.label || "Untitled question"}
-                {field.required && <span className="ml-1 text-danger" aria-label="required">*</span>}
+          <div className="flex min-w-0 flex-1 items-start gap-2">
+            <button onClick={onActivate} className="flex min-h-11 min-w-0 flex-1 items-start gap-3 rounded-lg py-2.5 text-left">
+              {number !== null && <span className="tabular mt-px w-6 shrink-0 text-sm text-fg-subtle">{number}.</span>}
+              <span className="min-w-0 flex-1">
+                {field.showIf && <ConditionTag field={field} ordered={ordered} numbers={numbers} />}
+                <span className={cn("block text-[15px] leading-snug", field.label ? "text-fg" : "italic text-fg-subtle", field.type === "statement" && "text-fg-muted")}>
+                  {field.label || "Untitled question"}
+                  {field.required && <span className="ml-1 text-danger" aria-hidden>*</span>}
+                </span>
+                {(field.options?.length ?? 0) > 0 && field.type !== "matrix" && (
+                  <span className="mt-1 block truncate text-[13px] text-fg-subtle">{field.options!.join(" · ")}</span>
+                )}
               </span>
-              {(field.options?.length ?? 0) > 0 && field.type !== "matrix" && (
-                <span className="mt-1 block truncate text-[13px] text-fg-subtle">{field.options!.join(" · ")}</span>
+            </button>
+            <div className="flex shrink-0 items-center gap-1.5 pt-2">
+              {field.type !== "statement" && (
+                <button
+                  onClick={() => onChange({ required: !field.required })}
+                  aria-pressed={field.required}
+                  aria-label={`${field.required ? "Required" : "Optional"} — click to make ${field.required ? "optional" : "required"}`}
+                  title={field.required ? "Required — click to make optional" : "Optional — click to make required"}
+                  className={cn(
+                    "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors duration-150",
+                    field.required
+                      ? "border-danger/30 bg-danger-soft text-danger hover:border-danger/60"
+                      : "border-border text-fg-subtle hover:border-border-strong hover:text-fg",
+                  )}
+                >
+                  <Asterisk className="size-3" aria-hidden />
+                  <span className="hidden sm:inline">{field.required ? "Required" : "Optional"}</span>
+                </button>
               )}
-            </span>
-            <Badge className="mt-0.5 shrink-0">
-              <Icon className="size-3.5" aria-hidden />
-              <span className="hidden sm:inline">{FIELD_TYPE_LABELS[field.type]}</span>
-            </Badge>
-          </button>
+              <Badge className="h-7">
+                <Icon className="size-3.5" aria-hidden />
+                <span className="hidden md:inline">{FIELD_TYPE_LABELS[field.type]}</span>
+              </Badge>
+            </div>
+          </div>
         ) : (
           <div className="min-w-0 flex-1 space-y-4 py-2">
             <div className="flex flex-col gap-3 sm:flex-row">
@@ -486,6 +552,8 @@ function FieldCard({
 
             <TypeEditor field={field} onChange={onChange} />
 
+            <LogicEditor field={field} ordered={ordered} numbers={numbers} onChange={onChange} />
+
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-1">
                 <IconBtn label="Duplicate question" onClick={onDuplicate}>
@@ -517,15 +585,14 @@ function FieldCard({
               </div>
               <div className="flex items-center gap-4">
                 {field.type !== "statement" && (
-                  <label className="flex items-center gap-2 text-sm text-fg">
-                    <input
-                      type="checkbox"
+                  <div className="w-44">
+                    <Switch
                       checked={field.required}
-                      onChange={(e) => onChange({ required: e.target.checked })}
-                      className="size-4 rounded accent-[var(--primary)]"
+                      onChange={(v) => onChange({ required: v })}
+                      label="Required"
+                      description={field.showIf ? "Only when shown" : undefined}
                     />
-                    Required
-                  </label>
+                  </div>
                 )}
                 <Button size="sm" variant="secondary" onClick={onClose}>
                   Done
@@ -536,6 +603,144 @@ function FieldCard({
         )}
       </div>
     </li>
+  );
+}
+
+// ── Follow-up logic ──────────────────────────────────────────────────────────
+
+function conditionProblem(field: Field, ordered: Field[]): string | null {
+  const cond = field.showIf;
+  if (!cond) return null;
+  const idx = ordered.findIndex((f) => f.id === field.id);
+  const ci = ordered.findIndex((f) => f.id === cond.fieldId);
+  if (ci === -1) return "Its trigger question was removed";
+  if (ci >= idx) return "Must come after its trigger question";
+  const ctrl = ordered[ci];
+  if (!(CONTROLLER_OPS[ctrl.type] ?? []).includes(cond.op)) return "Trigger question type changed";
+  if (cond.op !== "answered" && !conditionValues(ctrl).includes(cond.value ?? "")) return "Trigger answer no longer exists";
+  return null;
+}
+
+function ConditionTag({ field, ordered, numbers }: { field: Field; ordered: Field[]; numbers: Map<string, number> }) {
+  const problem = conditionProblem(field, ordered);
+  const ctrl = ordered.find((f) => f.id === field.showIf!.fieldId);
+  return (
+    <span className={cn("mb-1 flex items-start gap-1.5 text-xs font-medium leading-snug", problem ? "text-danger" : "text-accent")}>
+      {problem ? <AlertTriangle className="mt-px size-3.5 shrink-0" aria-hidden /> : <GitBranch className="mt-px size-3.5 shrink-0" aria-hidden />}
+      <span className="line-clamp-2">
+        {problem ? `Follow-up · ${problem}` : `Follow-up · shown if ${describeCondition(field.showIf!, ctrl, ctrl && numbers.get(ctrl.id))}`}
+      </span>
+    </span>
+  );
+}
+
+function LogicEditor({
+  field,
+  ordered,
+  numbers,
+  onChange,
+}: {
+  field: Field;
+  ordered: Field[];
+  numbers: Map<string, number>;
+  onChange: (patch: Partial<Field>) => void;
+}) {
+  const idx = ordered.findIndex((f) => f.id === field.id);
+  const candidates = ordered.slice(0, idx).filter((f) => CONTROLLER_OPS[f.type]);
+  const cond = field.showIf;
+  const ctrl = cond ? ordered.find((f) => f.id === cond.fieldId) : undefined;
+  const problem = conditionProblem(field, ordered);
+
+  const defaultCondition = (c: Field): Condition => {
+    const op = CONTROLLER_OPS[c.type]![0];
+    const values = conditionValues(c);
+    return op === "answered" ? { fieldId: c.id, op } : { fieldId: c.id, op, value: values[0] ?? "" };
+  };
+
+  const enable = (on: boolean) => {
+    if (!on) return onChange({ showIf: undefined });
+    // Prefer the nearest Yes/No or choice question above — the usual trigger.
+    const preferred =
+      [...candidates].reverse().find((c) => ["yes_no", "single_choice", "dropdown", "multi_choice"].includes(c.type)) ??
+      candidates[candidates.length - 1];
+    if (preferred) onChange({ showIf: defaultCondition(preferred), required: field.type === "statement" ? false : true });
+  };
+
+  const label = (f: Field) => `${numbers.has(f.id) ? `Q${numbers.get(f.id)}. ` : ""}${f.label || "Untitled question"}`;
+
+  return (
+    <div className={cn("rounded-xl border p-4", cond ? "border-accent/30 bg-accent-soft/40" : "border-border bg-surface-2/40")}>
+      <Switch
+        checked={!!cond}
+        onChange={enable}
+        disabled={!cond && candidates.length === 0}
+        label={
+          <span className="inline-flex items-center gap-1.5">
+            <GitBranch className="size-4 text-accent" aria-hidden /> Follow-up question
+          </span>
+        }
+        description={
+          candidates.length === 0 && !cond
+            ? "Add a question above this one to use it as a trigger."
+            : "Only show this question when an earlier answer matches. While hidden it's never required and isn't saved."
+        }
+      />
+      {cond && (
+        <div className="mt-4 space-y-2">
+          <p className="text-[13px] font-medium text-fg">Show this question only if</p>
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,0.8fr)]">
+            <Select
+              aria-label="Trigger question"
+              value={ctrl && candidates.some((c) => c.id === ctrl.id) ? ctrl.id : ""}
+              onChange={(e) => {
+                const c = candidates.find((x) => x.id === e.target.value);
+                if (c) onChange({ showIf: defaultCondition(c) });
+              }}
+              className="h-10 text-sm"
+            >
+              {!ctrl || !candidates.some((c) => c.id === ctrl.id) ? <option value="">Choose a question…</option> : null}
+              {candidates.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {label(c).slice(0, 70)}
+                </option>
+              ))}
+            </Select>
+            {ctrl && (
+              <Select
+                aria-label="Condition"
+                value={cond.op}
+                onChange={(e) => {
+                  const op = e.target.value as ConditionOp;
+                  onChange({ showIf: op === "answered" ? { fieldId: cond.fieldId, op } : { ...cond, op, value: cond.value ?? conditionValues(ctrl)[0] } });
+                }}
+                className="h-10 w-auto text-sm"
+              >
+                {(CONTROLLER_OPS[ctrl.type] ?? []).map((op) => (
+                  <option key={op} value={op}>
+                    {OP_LABELS[op]}
+                  </option>
+                ))}
+              </Select>
+            )}
+            {ctrl && cond.op !== "answered" && (
+              <Select aria-label="Answer" value={cond.value ?? ""} onChange={(e) => onChange({ showIf: { ...cond, value: e.target.value } })} className="h-10 text-sm">
+                {!conditionValues(ctrl).includes(cond.value ?? "") && <option value="">Choose an answer…</option>}
+                {conditionValues(ctrl).map((v) => (
+                  <option key={v} value={v}>
+                    {v}
+                  </option>
+                ))}
+              </Select>
+            )}
+          </div>
+          {problem && (
+            <p role="alert" className="flex items-center gap-1.5 text-[13px] text-danger">
+              <AlertTriangle className="size-3.5" aria-hidden /> {problem}. Pick a trigger again, or turn this off.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

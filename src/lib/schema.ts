@@ -1,12 +1,24 @@
 import { z } from "zod";
-import { FIELD_TYPES, type Field, type FieldType, type Section } from "./types";
+import { FIELD_TYPES, type Condition, type Field, type FieldType, type Section } from "./types";
+import { CONTROLLER_OPS, conditionValues } from "./logic";
 import { keyify, shortId } from "./utils";
 
 const str = (max: number) => z.string().trim().max(max);
 
 /** Lenient shape accepted from the editor or from the AI parser. */
+const conditionInput = z.object({
+  /** Question id (from the editor) … */
+  fieldId: z.string().max(40).optional().nullable(),
+  /** … or a document-local reference like "q3" (from the AI parser). */
+  ref: z.string().max(40).optional().nullable(),
+  op: z.string().max(20),
+  value: z.union([z.string(), z.number(), z.boolean()]).optional().nullable(),
+});
+
 export const fieldInput = z.object({
   id: z.string().max(40).optional(),
+  ref: z.string().max(40).optional().nullable(),
+  showIf: conditionInput.optional().nullable(),
   key: z.string().max(64).optional(),
   type: z.string(),
   label: str(2000).default(""),
@@ -174,6 +186,8 @@ export function normalizeContent(input: FormContentInput, previous?: Section[]) 
     return section;
   });
 
+  resolveConditions(input, sections);
+
   if (sections.length === 0) sections.push({ id: shortId(), title: "", fields: [] });
 
   return {
@@ -189,4 +203,45 @@ export function allFields(sections: Section[]): Field[] {
 
 export function answerableFields(sections: Section[]): Field[] {
   return allFields(sections).filter((f) => f.type !== "statement");
+}
+
+/**
+ * Attaches follow-up conditions. A condition is kept only if it points to an
+ * EARLIER question that can act as a trigger, with an operator and value that
+ * make sense for that question type; anything else is dropped silently.
+ */
+function resolveConditions(input: FormContentInput, sections: Section[]) {
+  const ordered = sections.flatMap((s) => s.fields);
+  const rawFields = input.sections.flatMap((s) => s.fields);
+  const refToIndex = new Map<string, number>();
+  rawFields.forEach((f, i) => {
+    if (f.ref) refToIndex.set(f.ref.trim().toLowerCase(), i);
+    refToIndex.set(ordered[i].id.toLowerCase(), i);
+  });
+
+  rawFields.forEach((raw, i) => {
+    const cond = raw.showIf;
+    if (!cond) return;
+    const key = (cond.fieldId || cond.ref || "").trim().toLowerCase();
+    const ci = refToIndex.get(key);
+    if (ci === undefined || ci >= i) return; // must reference an earlier question
+    const ctrl = ordered[ci];
+    const ops = CONTROLLER_OPS[ctrl.type] ?? [];
+    let op = cond.op.trim().toLowerCase().replace(/[^a-z_]/g, "") as Condition["op"];
+    if (op === ("is" as string) || op === ("eq" as string)) op = "equals";
+    if (op === ("contains" as string)) op = "includes";
+    if (ctrl.type === "multi_choice" && op === "equals") op = "includes";
+    if (!ops.includes(op)) return;
+
+    const resolved: Condition = { fieldId: ctrl.id, op };
+    if (op !== "answered") {
+      let value = cond.value === true ? "Yes" : cond.value === false ? "No" : String(cond.value ?? "").trim();
+      const allowed = conditionValues(ctrl);
+      const match = allowed.find((v) => v.toLowerCase() === value.toLowerCase());
+      if (!match) return;
+      value = match;
+      resolved.value = value;
+    }
+    ordered[i].showIf = resolved;
+  });
 }

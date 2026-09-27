@@ -16,6 +16,7 @@ Return ONLY a JSON object with this exact shape:
       "description": string,           // optional section intro
       "fields": [
         {
+          "ref": string,               // unique id for this question: "q1", "q2", "q3"… in document order
           "type": one of "short_text" | "long_text" | "email" | "phone" | "number" | "date" | "time" |
                   "single_choice" | "multi_choice" | "dropdown" | "yes_no" | "rating" | "scale" |
                   "matrix" | "file" | "statement",
@@ -26,7 +27,12 @@ Return ONLY a JSON object with this exact shape:
           "rows": string[],            // matrix rows only
           "allowOther": boolean,       // true when an "Other (please specify)" choice exists — do NOT also list "Other" in options
           "min": number, "max": number,           // scale bounds (e.g. 1–5 or 0–10) or rating max
-          "minLabel": string, "maxLabel": string  // scale end labels, e.g. "Strongly disagree"
+          "minLabel": string, "maxLabel": string, // scale end labels, e.g. "Strongly disagree"
+          "showIf": {                  // ONLY for follow-up questions; omit otherwise
+            "ref": string,             // ref of the EARLIER question that triggers this one
+            "op": "equals" | "not_equals" | "includes" | "answered",
+            "value": string            // the exact triggering choice, e.g. "Yes" or "Other" (omit for "answered")
+          }
         }
       ]
     }
@@ -49,6 +55,15 @@ Rules:
   • a TABLE whose rows are items and whose columns are rating choices → ONE matrix field (rows = row labels, options = column headers, excluding the first header cell)
   • requests to attach/upload/provide documents → file
   • pure instructions, notes or disclaimers that are not questions → statement (put the text in "label")
+- FOLLOW-UP QUESTIONS: when a question only applies depending on an earlier answer, add "showIf" pointing at that earlier question's "ref". Typical cues:
+  • "If yes, please give details / specify / explain", "If so, …", "If no, why not?"
+  • "If you ticked Other, please specify" (when the earlier question has no built-in allowOther text box)
+  • "If you answered B to question 4 …", "Only answer if …", "Skip to question 9 if …" (skip logic ⇒ the skipped questions get the opposite condition)
+  • Indented or lettered sub-questions (4a, 4b) that elaborate on one specific answer of the parent
+  Use "equals" for single-answer triggers (yes_no → "Yes"/"No"; single_choice/dropdown → one exact option), "includes" when the trigger is a multi_choice option, "not_equals" for "if not X", and "answered" when any answer to a text question should reveal it.
+  The trigger must appear BEFORE the follow-up. The "value" must exactly match one of the trigger's options (or "Yes"/"No" for yes_no, or "Other" if allowOther).
+  Follow-ups that ask for details/explanations ("please specify", "give details") should be "required": true — they are only enforced when shown.
+  A question that asks "Yes/No … If yes, give details" in ONE line becomes TWO questions: a yes_no, then a long_text follow-up with showIf equals "Yes".
 - A TABLE used as a fill-in layout (e.g. "Name: ___ | Date: ___") becomes separate simple fields, not a matrix.
 - required = true only if the document marks it (e.g. "*", "required", "mandatory"); otherwise false. Contact details (name, email) are usually required.
 - Omit signature lines, "office use only" blocks, page numbers, headers/footers.
