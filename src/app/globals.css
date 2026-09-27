@@ -1,26 +1,193 @@
 @import "tailwindcss";
 
+/* ── Design tokens ────────────────────────────────────────────────────────
+   "Editorial elegance": warm ivory paper, deep navy ink, restrained gold. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --bg: #f7f5f1;
+  --surface: #ffffff;
+  --surface-2: #f1eee8;
+  --surface-3: #e9e5dd;
+  --fg: #1a1d24;
+  --fg-muted: #5e6470;
+  --fg-subtle: #8a8f99;
+  --border: #e6e1d8;
+  --border-strong: #d3ccbf;
+  --primary: #1d2b4a;
+  --primary-hover: #2a3b61;
+  --primary-fg: #ffffff;
+  --primary-soft: #e8ecf4;
+  --accent: #8a5a12;
+  --accent-soft: #f5ecda;
+  --danger: #b42318;
+  --danger-soft: #fdecea;
+  --success: #1f7a4d;
+  --success-soft: #e6f4ec;
+  --ring: #3b5ba9;
+  --shadow-sm: 0 1px 2px rgb(20 24 33 / 0.05);
+  --shadow-md: 0 1px 2px rgb(20 24 33 / 0.04), 0 6px 20px -6px rgb(20 24 33 / 0.1);
+  --shadow-lg: 0 2px 6px rgb(20 24 33 / 0.05), 0 24px 48px -12px rgb(20 24 33 / 0.18);
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #0f1115;
+    --surface: #161a21;
+    --surface-2: #1c2129;
+    --surface-3: #252b35;
+    --fg: #eceae5;
+    --fg-muted: #a3a8b3;
+    --fg-subtle: #737985;
+    --border: #262c36;
+    --border-strong: #363d49;
+    --primary: #e9e4d8;
+    --primary-hover: #ffffff;
+    --primary-fg: #141821;
+    --primary-soft: #232a38;
+    --accent: #d9a55a;
+    --accent-soft: #2b2417;
+    --danger: #f97066;
+    --danger-soft: #2a1715;
+    --success: #5cc48b;
+    --success-soft: #132219;
+    --ring: #8aa4e8;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-md: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px -8px rgb(0 0 0 / 0.5);
+    --shadow-lg: 0 2px 6px rgb(0 0 0 / 0.3), 0 24px 48px -12px rgb(0 0 0 / 0.6);
+    color-scheme: dark;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-fg: var(--primary-fg);
+  --color-primary-soft: var(--primary-soft);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-ring: var(--ring);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument), ui-serif, Georgia, serif;
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: var(--accent-soft);
+    color: var(--fg);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button,
+  [role="button"],
+  label[for],
+  select,
+  summary {
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--fg-subtle);
+  }
+}
+
+@layer utilities {
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  .animate-in {
+    animation: fade-up 280ms var(--ease-out-soft) both;
+  }
+  .animate-fade {
+    animation: fade 200ms ease-out both;
+  }
+  .animate-pop {
+    animation: pop 220ms var(--ease-out-soft) both;
+  }
+  .animate-slide-in {
+    animation: slide-in 260ms var(--ease-out-soft) both;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

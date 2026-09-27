@@ -1,0 +1,38 @@
+import {
+  AlignLeft,
+  AtSign,
+  Calendar,
+  CircleDot,
+  Clock,
+  Grid3x3,
+  Hash,
+  ListChecks,
+  Paperclip,
+  Phone,
+  Pilcrow,
+  SlidersHorizontal,
+  SquareChevronDown,
+  Star,
+  ToggleLeft,
+  Type,
+} from "lucide-react";
+import type { FieldType } from "@/lib/types";
+
+export const FIELD_ICONS: Record<FieldType, React.ComponentType<{ className?: string }>> = {
+  short_text: Type,
+  long_text: AlignLeft,
+  email: AtSign,
+  phone: Phone,
+  number: Hash,
+  date: Calendar,
+  time: Clock,
+  single_choice: CircleDot,
+  multi_choice: ListChecks,
+  dropdown: SquareChevronDown,
+  yes_no: ToggleLeft,
+  rating: Star,
+  scale: SlidersHorizontal,
+  matrix: Grid3x3,
+  file: Paperclip,
+  statement: Pilcrow,
+};

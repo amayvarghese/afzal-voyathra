@@ -1,36 +1,69 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Voyathra Travel & Tourism — Questionnaire Studio
 
-## Getting Started
+Turn Word questionnaires into elegant, shareable web forms for Voyathra customers.
 
-First, run the development server:
+Upload `.docx` questionnaires, let AI (Groq) turn them into polished web forms, edit them in a visual builder, and share a link with customers. Every submission is:
+
+- stored in **MongoDB** — one collection per questionnaire (e.g. `responses_client_onboarding_ab12c`), one document per submission, one field per question;
+- emailed to you via **Gmail** (and optionally a copy to the customer);
+- viewable in the admin **Responses** dashboard, with **CSV export**.
+
+Built with Next.js 16 (App Router), Tailwind CSS 4, MongoDB driver 7, Nodemailer, Vercel Blob.
+
+---
+
+## 1. Local setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+cp .env.example .env.local   # then fill in the values (see below)
+npm run dev                  # http://localhost:3000 → /admin
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 2. Credentials you need
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Where to get it |
+|---|---|
+| `MONGODB_URI` | [MongoDB Atlas](https://cloud.mongodb.com) → your cluster → **Connect → Drivers** → copy the `mongodb+srv://…` string. In **Network Access** allow `0.0.0.0/0` (Vercel uses dynamic IPs). |
+| `MONGODB_DB` | Any database name, e.g. `voyathra`. Created automatically. |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Your admin login for `/admin`. |
+| `AUTH_SECRET` | Random 32+ chars: `openssl rand -base64 48` |
+| `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) |
+| `GMAIL_USER` | The Gmail address that sends the emails. |
+| `GMAIL_APP_PASSWORD` | Turn on 2-Step Verification, then create one at [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords). (Your normal Gmail password will **not** work.) |
+| `NOTIFY_EMAILS` | Optional. Default recipients for new-response emails (comma-separated). Each form can override this in **Settings**. |
+| `BLOB_READ_WRITE_TOKEN` | Only for *File upload* questions. Vercel → **Storage → Create → Blob** → connect to the project (sets it automatically). Run `vercel env pull .env.local` to use it locally. |
+| `NEXT_PUBLIC_BRAND_NAME` | Name shown on forms and emails. |
+| `APP_URL` | Optional. Public URL used in email links (e.g. `https://forms.yourcompany.com`). |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The admin dashboard shows a **Setup** checklist of what's connected, plus a **Send test email** button.
 
-## Learn More
+## 3. Deploy to Vercel
 
-To learn more about Next.js, take a look at the following resources:
+1. Push this folder to a GitHub repo.
+2. [vercel.com/new](https://vercel.com/new) → import the repo (framework: Next.js, no build settings needed).
+3. Add all environment variables from `.env.example` under **Settings → Environment Variables**.
+4. (Optional) **Storage → Blob** → create and connect to enable file uploads.
+5. Deploy. Share links look like `https://your-app.vercel.app/f/<questionnaire-name>`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How it works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Import**: `.docx` → [mammoth](https://github.com/mwilliamson/mammoth.js) extracts headings, lists, checkboxes and tables → Groq (`openai/gpt-oss-120b`, falling back to `llama-3.3-70b-versatile`) returns a structured form definition → validated and normalised → saved. Change models with `GROQ_MODEL` / `GROQ_FALLBACK_MODEL`.
+- **Question types**: short answer, paragraph, email, phone, number, date, time, multiple choice (+ "Other"), checkboxes, dropdown, yes/no, star rating, linear scale, grid (matrix), file upload, text block.
+- **Editing**: every save creates a new version. Each question keeps a stable database column (`key`), so renaming a question never breaks existing data; answers to deleted questions stay in the database and appear in the CSV as "(removed)".
+- **Customers**: step-by-step sections with progress bar, inline validation, auto-saved drafts on their device, mobile-first, light/dark aware.
+- **Security**: admin routes protected by a signed, http-only session cookie (checked in `src/proxy.ts` and again in every admin API route); all submissions are validated server-side against the form definition; honeypot spam protection; CSV formula-injection protection.
 
-## Deploy on Vercel
+## Project structure
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```
+src/
+  app/
+    admin/            login, dashboard, builder, responses, settings
+    f/[slug]/         public questionnaire page
+    api/admin/…       CRUD, import, export (auth required)
+    api/public/…      submit + file-upload token
+  components/         UI (admin/, public/, ui/)
+  lib/                db, forms repo, groq, docx, mail, validation, schema
+  proxy.ts            auth gate for /admin and /api/admin
+```
